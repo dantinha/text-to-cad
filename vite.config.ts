@@ -9,6 +9,8 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: { port: 5173, strictPort: true },
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['manifold-3d'] },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
