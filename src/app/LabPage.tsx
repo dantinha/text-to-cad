@@ -75,8 +75,10 @@ export function LabPage() {
 
   return (
     <main
+      id="editor-main"
+      tabIndex={-1}
       data-testid="lab-page"
-      className="min-h-0 flex-1 overflow-y-auto bg-zinc-950 p-4 text-zinc-100"
+      className="min-h-0 flex-1 overflow-y-auto bg-zinc-950 p-4 text-zinc-100 focus:outline-none"
     >
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <div>

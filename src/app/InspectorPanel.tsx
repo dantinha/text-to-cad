@@ -8,10 +8,15 @@ import {
   sanitizeFilename,
   triggerBlobDownload,
 } from '@/export';
+import { PT_BR } from '@/i18n/pt-BR';
 
 export type InspectorTab = 'scad' | 'ir';
 
 export interface InspectorPanelProps {
+  readonly id?: string;
+  readonly className?: string;
+  readonly role?: 'tabpanel';
+  readonly ariaLabelledBy?: string;
   readonly modelName: string;
   readonly modelSubtitle: string;
   readonly doc: IRDocument | null;
@@ -27,14 +32,18 @@ interface ExportFeedback {
 }
 
 const INSPECTOR_TABS: readonly { readonly id: InspectorTab; readonly label: string }[] = [
-  { id: 'scad', label: 'OpenSCAD (.scad)' },
-  { id: 'ir', label: 'IR (JSON)' },
+  { id: 'scad', label: PT_BR.inspector.tabScad },
+  { id: 'ir', label: PT_BR.inspector.tabIr },
 ];
 
 /**
  * Painel direito: exportação (.stl, .scad, .json) e inspetor de código com abas WAI-ARIA.
  */
 export function InspectorPanel({
+  id,
+  className = 'flex h-full',
+  role,
+  ariaLabelledBy,
   modelName,
   modelSubtitle,
   doc,
@@ -151,14 +160,17 @@ export function InspectorPanel({
 
   return (
     <aside
-      aria-label="Exportação e inspetor de código CAD"
-      className="flex h-72 w-full shrink-0 flex-col border-t border-zinc-800 bg-zinc-900/50 lg:h-auto lg:w-[380px] lg:border-t-0 lg:border-l xl:w-[420px]"
+      id={id}
+      role={role}
+      aria-labelledby={ariaLabelledBy}
+      aria-label={role ? undefined : 'Exportação e inspetor de código CAD'}
+      className={`w-full shrink-0 flex-col border-t border-zinc-800 bg-zinc-900/50 lg:flex lg:h-auto lg:w-[380px] lg:flex-none lg:border-t-0 lg:border-l xl:w-[420px] ${className}`}
     >
       {/* Barra de exportação */}
       <div className="border-b border-zinc-800 px-3 py-2.5">
         <div className="mb-1.5 flex items-center justify-between gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-            Exportar Modelo
+            {PT_BR.inspector.exportTitle}
           </span>
           <span
             data-testid="export-status"
@@ -176,12 +188,12 @@ export function InspectorPanel({
             type="button"
             data-testid="export-stl"
             disabled={!mesh || loading}
-            aria-label="Baixar modelo em formato STL binário"
+            aria-label={PT_BR.inspector.downloadStlAria}
             onClick={handleExportStl}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-400 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Baixar .STL</span>
+            <span>{PT_BR.inspector.downloadStl}</span>
           </button>
 
           <button
@@ -212,7 +224,7 @@ export function InspectorPanel({
 
       {/* Cabeçalho das abas de código */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-        <div role="tablist" aria-label="Formato de inspeção" className="flex gap-1">
+        <div role="tablist" aria-label={PT_BR.inspector.tabsAriaLabel} className="flex gap-1">
           {INSPECTOR_TABS.map((tab, idx) => {
             const isSelected = activeTab === tab.id;
             const Icon = tab.id === 'scad' ? Code2 : FileJson;
@@ -254,12 +266,12 @@ export function InspectorPanel({
           {copied ? (
             <>
               <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-              <span>Copiado</span>
+              <span>{PT_BR.inspector.copied}</span>
             </>
           ) : (
             <>
               <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Copiar</span>
+              <span>{PT_BR.inspector.copy}</span>
             </>
           )}
         </button>

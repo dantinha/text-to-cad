@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Cpu, KeyRound, Loader2, Send, X } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent, useId, useState } from 'react';
 import { clearByokKey, getByokKey, MAX_PROMPT_LENGTH, setByokKey } from '@/ai';
+import { PT_BR } from '@/i18n/pt-BR';
 
 export interface AiPromptFeedback {
   readonly status: 'idle' | 'loading' | 'success' | 'error';
@@ -72,10 +73,10 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
             className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300"
           >
             <Cpu className="h-3.5 w-3.5 text-indigo-400" aria-hidden="true" />
-            <span>Prompt IA (Gemini)</span>
+            <span>{PT_BR.ai.sectionTitle}</span>
           </label>
           <span className="font-mono text-[10px] tabular-nums text-zinc-400">
-            Ctrl+Enter · {prompt.length}/{MAX_PROMPT_LENGTH}
+            {PT_BR.ai.shortcutHint} · {prompt.length}/{MAX_PROMPT_LENGTH}
           </span>
         </div>
 
@@ -88,7 +89,7 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
           maxLength={MAX_PROMPT_LENGTH}
           rows={2}
           aria-keyshortcuts="Control+Enter Meta+Enter"
-          placeholder="Descreva a peça em mm (ex.: suporte em L 80x40 mm com 2 furos)"
+          placeholder={PT_BR.ai.placeholder}
           className="w-full resize-none rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs leading-relaxed text-zinc-100 placeholder:text-zinc-400 focus:border-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500"
         />
 
@@ -123,7 +124,7 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
             ) : (
               <Send className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            <span>{generating ? 'Gerando...' : 'Gerar modelo'}</span>
+            <span>{generating ? 'Gerando...' : PT_BR.ai.generate}</span>
           </button>
 
           {generating ? (
@@ -135,7 +136,7 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
               className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Cancelar</span>
+              <span>{PT_BR.ai.cancel}</span>
             </button>
           ) : null}
         </div>
@@ -153,10 +154,10 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
         >
           <span className="inline-flex items-center gap-1.5">
             <KeyRound className="h-3 w-3 text-zinc-400" aria-hidden="true" />
-            <span>Chave própria (BYOK)</span>
+            <span>{PT_BR.ai.byokToggle}</span>
             {byokValue.trim().length > 0 ? (
               <span className="rounded bg-indigo-600/20 px-1 py-0.5 font-mono text-[10px] text-indigo-300">
-                ativa
+                {PT_BR.ai.byokActive}
               </span>
             ) : null}
           </span>
@@ -170,7 +171,7 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
         {byokOpen ? (
           <div id={byokRegionId} className="mt-2 space-y-1.5">
             <label htmlFor={byokInputId} className="block text-[11px] text-zinc-400">
-              Chave API Gemini
+              {PT_BR.ai.byokLabel}
             </label>
             <div className="flex items-center gap-1.5">
               <input
@@ -186,18 +187,15 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
               <button
                 type="button"
                 data-testid="ai-byok-clear"
-                aria-label="Limpar chave API Gemini"
+                aria-label={PT_BR.ai.byokClearAria}
                 disabled={byokValue.length === 0}
                 onClick={handleClearByok}
                 className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Limpar
+                {PT_BR.ai.byokClear}
               </button>
             </div>
-            <p className="text-[10px] leading-snug text-zinc-400">
-              Guardada apenas nesta aba (sessionStorage); nunca gravada em disco nem enviada em
-              logs.
-            </p>
+            <p className="text-[10px] leading-snug text-zinc-400">{PT_BR.ai.byokPrivacyNote}</p>
           </div>
         ) : null}
       </div>
@@ -219,11 +217,11 @@ export function AiPromptPanel({ generating, feedback, onGenerate, onCancel }: Ai
         }`}
       >
         {feedback.status === 'loading'
-          ? 'Gerando e validando geometria via Gemini...'
+          ? PT_BR.ai.loadingMessage
           : feedback.status === 'success'
-            ? 'Modelo gerado pela IA e validado.'
+            ? PT_BR.ai.successMessage
             : isError
-              ? `${feedback.message} Simplifique o prompt ou escolha um preset abaixo.`
+              ? `${feedback.message} ${PT_BR.ai.errorTip}`
               : feedback.message}
       </div>
     </section>

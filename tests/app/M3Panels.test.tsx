@@ -40,6 +40,7 @@ vi.mock('@/viewer', () => ({
 import { App } from '@/app/App';
 import { InspectorPanel } from '@/app/InspectorPanel';
 import { ParamPanel } from '@/app/ParamPanel';
+import { useCadStore } from '@/app/store';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,6 +49,9 @@ describe('ParamPanel e InspectorPanel (M3)', () => {
   let root: Root;
 
   beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    useCadStore.getState().resetWorkspace();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

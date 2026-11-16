@@ -50,6 +50,8 @@ vi.mock('@/ai', async () => {
 });
 
 import { App } from '@/app/App';
+import { useCadStore } from '@/app/store';
+import { PT_BR } from '@/i18n/pt-BR';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,6 +72,7 @@ describe('Integração M4: AiPromptPanel e modo IA no App', () => {
     window.sessionStorage.clear();
     window.localStorage.clear();
     window.history.replaceState({}, '', '/');
+    useCadStore.getState().resetWorkspace();
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -112,8 +115,7 @@ describe('Integração M4: AiPromptPanel e modo IA no App', () => {
     await flushMicrotasks();
 
     const statusBadge = container.querySelector('[data-testid="app-status"]');
-    expect(statusBadge?.textContent).toContain('M4');
-    expect(statusBadge?.textContent).toContain('IA Gemini');
+    expect(statusBadge?.textContent).toBe(PT_BR.app.statusBadge);
 
     const textarea = container.querySelector(
       '[data-testid="ai-prompt-input"]',
@@ -312,7 +314,10 @@ describe('Integração M4: AiPromptPanel e modo IA no App', () => {
       signal: expect.any(AbortSignal),
       userKey: 'AIza-chave-teste-sessao',
     });
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.getItem(BYOK_SESSION_KEY)).toBeNull();
+    expect(window.localStorage.getItem('text-to-cad:history:v1') ?? '').not.toContain(
+      'AIza-chave-teste-sessao',
+    );
 
     const clearBtn = container.querySelector('[data-testid="ai-byok-clear"]') as HTMLButtonElement;
     await act(async () => {

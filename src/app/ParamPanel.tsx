@@ -1,4 +1,5 @@
 import { RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { PT_BR } from '@/i18n/pt-BR';
 import type { ParamValues, PresetDefinition } from '@/presets';
 
 export interface ParamPanelProps {
@@ -21,7 +22,7 @@ function formatParamValue(value: number, unit: 'mm' | 'un'): string {
 }
 
 /**
- * Painel esquerdo (M3/M4): seleção dos 4 presets e sliders paramétricos em mm/un.
+ * Painel esquerdo (M3/M4/M5): seleção dos 4 presets e sliders paramétricos em mm/un.
  */
 export function ParamPanel({
   presets,
@@ -37,7 +38,7 @@ export function ParamPanel({
       {/* Lista de presets */}
       <div className="border-b border-zinc-800 p-3">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-          Modelos Paramétricos
+          {PT_BR.presets.sectionTitle}
         </p>
         <div
           role="group"
@@ -74,26 +75,26 @@ export function ParamPanel({
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Parâmetros</span>
+            <span>{PT_BR.presets.paramsTitle}</span>
           </div>
 
           {!isAiActive ? (
             <button
               type="button"
               data-testid="reset-params"
-              aria-label="Restaurar parâmetros padrão"
+              aria-label={PT_BR.presets.resetDefaultAria}
               onClick={onResetParams}
               className="inline-flex items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
-              <span>Padrão</span>
+              <span>{PT_BR.presets.resetDefault}</span>
             </button>
           ) : null}
         </div>
 
         {isAiActive ? (
           <p className="rounded border border-zinc-800 bg-zinc-900/70 px-2.5 py-2 text-[11px] leading-relaxed text-zinc-400">
-            Modelo gerado por IA ativo. Selecione um preset acima para ajustar parâmetros manuais.
+            {PT_BR.presets.aiActiveHint}
           </p>
         ) : (
           <div className="space-y-3">
