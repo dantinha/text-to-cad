@@ -1,0 +1,12 @@
+# Configuração de deploy do Proxy `/api/gemini` no Cloudflare Workers.
+# Segredos NUNCA devem ser colocados aqui — use:
+#   npx wrangler secret put GEMINI_API_KEY
+#   npx wrangler secret put ALLOWED_ORIGINS
+
+name = "text-to-cad-gemini-proxy"
+main = "server/worker.ts"
+compatibility_date = "2026-11-01"
+
+[vars]
+GEMINI_MODEL = "gemini-2.5-flash"
+RATE_LIMIT_MAX = "15"

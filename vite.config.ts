@@ -23,6 +23,8 @@ export default defineConfig({
         'src/export/**',
         'src/presets/**',
         'src/ai/**',
+        'src/app/**',
+        'src/i18n/**',
         'server/**',
       ],
       exclude: ['src/**/*.d.ts'],
