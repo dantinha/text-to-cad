@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
-test.describe('M2 — Pipeline CSG sem IA', () => {
-  test('avalia o cubo com furo no Web Worker, renderiza no viewport e exibe código OpenSCAD', async ({
+test.describe('M3 — Presets Paramétricos, Exportação STL e /lab', () => {
+  test('seleciona preset, ajusta slider, renderiza em 3D e exporta arquivo .stl binário válido', async ({
     page,
   }) => {
     const errors: string[] = [];
@@ -9,42 +10,57 @@ test.describe('M2 — Pipeline CSG sem IA', () => {
 
     await page.goto('/');
     await expect(page.getByTestId('app-title')).toHaveText('Text-to-CAD');
-    await expect(page.getByTestId('app-status')).toBeVisible();
+    await expect(page.getByTestId('app-status')).toContainText('M3');
 
-    // Aguarda o kernel finalizar a avaliação do cubo 40x30x20 menos furo
+    // Aguarda avaliação inicial do primeiro preset (Suporte em L)
     const metrics = page.getByTestId('viewport-metrics');
     await expect(metrics).toBeVisible({ timeout: 15_000 });
-    await expect(metrics).toContainText('40');
-    await expect(metrics).toContainText('30');
-    await expect(metrics).toContainText('20');
-    await expect(metrics).toContainText('22,43 cm³');
-
-    // Etiquetas de cota X, Y e Z visíveis sobre o canvas
-    await expect(page.getByTestId('dim-label-x')).toContainText('X 40,0 mm');
-    await expect(page.getByTestId('dim-label-y')).toContainText('Y 30,0 mm');
-    await expect(page.getByTestId('dim-label-z')).toContainText('Z 20,0 mm');
-
-    // Canvas WebGL montado
     await expect(page.locator('canvas')).toBeVisible();
+    await expect(page.getByTestId('dim-label-x')).toContainText('X 60,0 mm');
 
-    // Código OpenSCAD gerado deterministicamente
+    // Troca para Flange com Furação e ajusta o diâmetro externo via slider
+    await page.getByTestId('preset-flange').click();
+    await expect(page.getByTestId('dim-label-x')).toContainText('X 100,0 mm', { timeout: 10_000 });
+
     const code = page.getByTestId('inspector-code');
-    await expect(code).toContainText('difference()');
-    await expect(code).toContainText('cube([40, 30, 20], center = true);');
-    await expect(code).toContainText('cylinder(h = 40, r = 5, center = true, $fn = 64);');
+    await expect(code).toContainText('Flange com furação');
 
-    // Alterna os 4 modos de renderização sem erro
+    const slider = page.getByTestId('param-slider-diametroExterno');
+    await slider.fill('140');
+    await slider.dispatchEvent('change');
+    await expect(page.getByTestId('dim-label-x')).toContainText('X 140,0 mm', { timeout: 10_000 });
+
+    // Alterna modos de renderização sem erro
     for (const mode of ['wireframe', 'clay', 'xray', 'solid'] as const) {
       const btn = page.getByTestId(`render-mode-${mode}`);
       await btn.click();
       await expect(btn).toHaveAttribute('aria-pressed', 'true');
     }
 
-    // Troca de modelo e alterna aba para IR (JSON)
-    await page.getByTestId('demo-model-perfil-l').click();
-    await expect(code).toContainText('linear_extrude(height = 20, center = true)');
-    await page.getByTestId('tab-ir').click();
-    await expect(code).toContainText('"type": "extrude"');
+    // Exporta .STL binário e valida o formato real dos bytes baixados
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('export-stl').click(),
+    ]);
+    expect(download.suggestedFilename()).toBe('Flange-com-Furacao.stl');
+    const filePath = await download.path();
+    expect(filePath).toBeTruthy();
+    if (filePath) {
+      const buf = readFileSync(filePath);
+      expect(buf.byteLength).toBeGreaterThan(84);
+      const triCount = buf.readUInt32LE(80);
+      expect(triCount).toBeGreaterThan(50);
+      expect(buf.byteLength).toBe(84 + triCount * 50);
+    }
+
+    // Navega para /lab e confirma que todos os 4 presets avaliam e exibem métricas
+    await page.getByTestId('nav-lab').click();
+    await expect(page.getByTestId('lab-page')).toBeVisible();
+    for (const id of ['suporte-l', 'flange', 'caixa-divisorias', 'bucha']) {
+      const card = page.getByTestId(`lab-card-${id}`);
+      await expect(card).toBeVisible();
+      await expect(card.getByTestId('viewport-metrics')).toBeVisible({ timeout: 20_000 });
+    }
 
     expect(errors).toEqual([]);
   });

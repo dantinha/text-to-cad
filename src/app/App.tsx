@@ -1,153 +1,166 @@
-import { Check, Code2, Copy, FileJson, Layers3 } from 'lucide-react';
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FlaskConical, Layers3 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { emitScad, validateIR, type MeshData } from '@/core';
 import { createKernelClient, type KernelClient } from '@/kernel';
+import { getPresetById, PRESETS, type ParamValues } from '@/presets';
 import { Viewport3D } from '@/viewer';
-import { M2_DEMO_MODELS } from './demoModels';
+import { InspectorPanel } from './InspectorPanel';
+import { LabPage } from './LabPage';
+import { ParamPanel } from './ParamPanel';
 
-type InspectorTab = 'scad' | 'ir';
+type AppRoute = 'editor' | 'lab';
 
 interface EvalState {
-  readonly modelId: string;
+  readonly evalKey: string;
   readonly mesh: MeshData | null;
   readonly error: string | null;
 }
 
-const INSPECTOR_TABS: readonly { readonly id: InspectorTab; readonly label: string }[] = [
-  { id: 'scad', label: 'OpenSCAD (.scad)' },
-  { id: 'ir', label: 'IR (JSON)' },
-];
+const SLIDER_DEBOUNCE_MS = 120;
+
+function resolveDefaultPreset() {
+  const first = PRESETS[0];
+  if (!first) {
+    throw new Error('Nenhum preset paramétrico registrado.');
+  }
+  return first;
+}
+
+const DEFAULT_PRESET = resolveDefaultPreset();
+
+const readCurrentRoute = (): AppRoute =>
+  typeof window !== 'undefined' && window.location.pathname === '/lab' ? 'lab' : 'editor';
 
 /**
- * Shell do Marco 2: valida o IR, avalia no Web Worker (manifold-3d),
- * transpila para OpenSCAD (.scad) e renderiza no Viewport 3D R3F.
+ * Shell do Marco 3: presets paramétricos com sliders (< 300 ms),
+ * kernel Web Worker, viewport R3F, exportação STL/SCAD/JSON e rota `/lab`.
  */
 export function App() {
-  const [selectedId, setSelectedId] = useState<string>(M2_DEMO_MODELS[0]?.id ?? 'cubo-furo');
-  const [activeTab, setActiveTab] = useState<InspectorTab>('scad');
+  const [route, setRoute] = useState<AppRoute>(readCurrentRoute);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET.id);
+  const [paramsByPreset, setParamsByPreset] = useState<Readonly<Record<string, ParamValues>>>(() =>
+    Object.fromEntries(PRESETS.map((p) => [p.id, p.defaultParams])),
+  );
   const [evalState, setEvalState] = useState<EvalState>({
-    modelId: '',
+    evalKey: '',
     mesh: null,
     error: null,
   });
-  const [copied, setCopied] = useState<boolean>(false);
 
   const clientRef = useRef<KernelClient | null>(null);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tabRefs = useRef<Record<InspectorTab, HTMLButtonElement | null>>({
-    scad: null,
-    ir: null,
-  });
+  const hasEvaluatedRef = useRef(false);
 
-  const selectedModel = useMemo(
-    () => M2_DEMO_MODELS.find((m) => m.id === selectedId) ?? M2_DEMO_MODELS[0],
-    [selectedId],
+  useEffect(() => {
+    const onPopState = () => setRoute(readCurrentRoute());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigate = (nextRoute: AppRoute) => {
+    const targetPath = nextRoute === 'lab' ? '/lab' : '/';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setRoute(nextRoute);
+  };
+
+  const selectedPreset = useMemo(
+    () => getPresetById(selectedPresetId) ?? DEFAULT_PRESET,
+    [selectedPresetId],
   );
 
-  const validatedDoc = useMemo(() => {
-    if (!selectedModel) return null;
-    return validateIR(selectedModel.doc);
-  }, [selectedModel]);
+  const currentParams = useMemo(
+    () => paramsByPreset[selectedPreset.id] ?? selectedPreset.defaultParams,
+    [paramsByPreset, selectedPreset],
+  );
+
+  const rawDoc = useMemo(
+    () => selectedPreset.buildIR(currentParams),
+    [selectedPreset, currentParams],
+  );
+
+  const validatedDoc = useMemo(() => validateIR(rawDoc), [rawDoc]);
+
+  const evalKey = useMemo(
+    () => `${selectedPreset.id}:${JSON.stringify(currentParams)}`,
+    [selectedPreset.id, currentParams],
+  );
 
   const scadCode = useMemo(() => {
-    if (!validatedDoc || !validatedDoc.ok) return '';
+    if (!validatedDoc.ok) return '';
     return emitScad(validatedDoc.value);
   }, [validatedDoc]);
 
   const irJson = useMemo(() => {
-    if (!validatedDoc || !validatedDoc.ok) return '';
+    if (!validatedDoc.ok) return '';
     return JSON.stringify(validatedDoc.value, null, 2);
   }, [validatedDoc]);
 
   const validationError = useMemo(() => {
-    if (!validatedDoc || validatedDoc.ok) return null;
+    if (validatedDoc.ok) return null;
     return validatedDoc.error.map((i) => `${i.path}: ${i.message}`).join(' ');
   }, [validatedDoc]);
 
   useEffect(() => {
+    if (route !== 'editor') return;
     const client = createKernelClient();
     clientRef.current = client;
     return () => {
       client.dispose();
       clientRef.current = null;
     };
-  }, []);
+  }, [route]);
 
   useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) {
-        clearTimeout(copyTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedModel || !validatedDoc || !validatedDoc.ok) return;
+    if (route !== 'editor' || !validatedDoc.ok) return;
 
     const client = clientRef.current;
     if (!client) return;
 
-    const modelId = selectedModel.id;
     const controller = new AbortController();
+    const delay = hasEvaluatedRef.current ? SLIDER_DEBOUNCE_MS : 0;
 
-    void client.evaluate(validatedDoc.value, controller.signal).then((res) => {
-      if (controller.signal.aborted) return;
-      if (res.ok) {
-        setEvalState({ modelId, mesh: res.value, error: null });
-      } else if (res.error.code !== 'cancelled') {
-        setEvalState({ modelId, mesh: null, error: res.error.message });
-      }
-    });
+    const timer = setTimeout(() => {
+      hasEvaluatedRef.current = true;
+      void client.evaluate(validatedDoc.value, controller.signal).then((res) => {
+        if (controller.signal.aborted) return;
+        if (res.ok) {
+          setEvalState({ evalKey, mesh: res.value, error: null });
+        } else if (res.error.code !== 'cancelled') {
+          setEvalState({ evalKey, mesh: null, error: res.error.message });
+        }
+      });
+    }, delay);
 
     return () => {
+      clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedModel, validatedDoc]);
+  }, [route, validatedDoc, evalKey]);
 
-  const isCurrentModel = selectedModel !== undefined && evalState.modelId === selectedModel.id;
-  const loading = Boolean(validatedDoc?.ok) && !isCurrentModel;
-  const error = validationError ?? (isCurrentModel ? evalState.error : null);
+  const isCurrentEval = evalState.evalKey === evalKey;
+  const loading = route === 'editor' && validatedDoc.ok && !isCurrentEval;
+  const error = validationError ?? (isCurrentEval ? evalState.error : null);
   const mesh = error ? null : evalState.mesh;
 
-  const handleCopy = async () => {
-    const text = activeTab === 'scad' ? scadCode : irJson;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
+  const handleChangeParam = (key: string, value: number) => {
+    setParamsByPreset((prev) => {
+      const current = prev[selectedPreset.id] ?? selectedPreset.defaultParams;
+      const clamped = selectedPreset.clampParams({ ...current, [key]: value });
+      return { ...prev, [selectedPreset.id]: clamped };
+    });
   };
 
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
-    let nextIndex: number;
-    if (event.key === 'ArrowRight') {
-      nextIndex = (currentIndex + 1) % INSPECTOR_TABS.length;
-    } else if (event.key === 'ArrowLeft') {
-      nextIndex = (currentIndex - 1 + INSPECTOR_TABS.length) % INSPECTOR_TABS.length;
-    } else if (event.key === 'Home') {
-      nextIndex = 0;
-    } else if (event.key === 'End') {
-      nextIndex = INSPECTOR_TABS.length - 1;
-    } else {
-      return;
-    }
-    event.preventDefault();
-    const nextTab = INSPECTOR_TABS[nextIndex];
-    if (nextTab) {
-      setActiveTab(nextTab.id);
-      tabRefs.current[nextTab.id]?.focus();
-    }
+  const handleResetParams = () => {
+    setParamsByPreset((prev) => ({
+      ...prev,
+      [selectedPreset.id]: selectedPreset.defaultParams,
+    }));
   };
-
-  const activeTabButtonId = `inspector-tab-${activeTab}`;
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100 antialiased">
-      {/* Cabeçalho compacto */}
+      {/* Cabeçalho */}
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/80 px-4 py-2.5">
         <div className="flex items-center gap-3">
           <div className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-800 text-indigo-400">
@@ -162,130 +175,74 @@ export function App() {
                 data-testid="app-status"
                 className="rounded border border-zinc-700 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300"
               >
-                M2 · Pipeline CSG
+                M3 · Paramétrico &amp; STL
               </span>
             </div>
             <p className="text-[11px] text-zinc-400">
-              IR paramétrico → manifold-3d (Worker) → Viewport 3D &amp; OpenSCAD
+              Presets paramétricos → manifold-3d (Worker) → Viewport 3D &amp; Exportação
             </p>
           </div>
         </div>
 
-        {/* Seletor rápido de modelos de demonstração */}
-        <nav aria-label="Modelos de demonstração" className="flex flex-wrap items-center gap-1.5">
-          {M2_DEMO_MODELS.map((model) => {
-            const active = model.id === selectedId;
-            return (
-              <button
-                key={model.id}
-                type="button"
-                data-testid={`demo-model-${model.id}`}
-                aria-pressed={active}
-                onClick={() => setSelectedId(model.id)}
-                className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 ${
-                  active
-                    ? 'border-indigo-500/60 bg-indigo-600/20 text-indigo-200'
-                    : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
-                }`}
-              >
-                {model.label}
-              </button>
-            );
-          })}
+        <nav aria-label="Navegação principal" className="flex items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="nav-editor"
+            aria-current={route === 'editor' ? 'page' : undefined}
+            onClick={() => navigate('editor')}
+            className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 ${
+              route === 'editor'
+                ? 'border-indigo-500/60 bg-indigo-600/20 text-indigo-200'
+                : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            Editor
+          </button>
+          <button
+            type="button"
+            data-testid="nav-lab"
+            aria-current={route === 'lab' ? 'page' : undefined}
+            onClick={() => navigate('lab')}
+            className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 ${
+              route === 'lab'
+                ? 'border-indigo-500/60 bg-indigo-600/20 text-indigo-200'
+                : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Lab (/lab)</span>
+          </button>
         </nav>
       </header>
 
-      {/* Área principal: Viewport 3D + Inspetor de Código */}
-      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative min-h-[380px] flex-1 border-b border-zinc-800 lg:border-r lg:border-b-0">
-          <Viewport3D mesh={mesh} loading={loading} error={error} />
-        </div>
+      {route === 'lab' ? (
+        <LabPage />
+      ) : (
+        <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <ParamPanel
+            presets={PRESETS}
+            selectedPreset={selectedPreset}
+            params={currentParams}
+            onSelectPreset={setSelectedPresetId}
+            onChangeParam={handleChangeParam}
+            onResetParams={handleResetParams}
+          />
 
-        <aside
-          aria-label="Inspetor de código CAD"
-          className="flex h-72 w-full flex-col bg-zinc-900/50 lg:h-auto lg:w-[420px] xl:w-[460px]"
-        >
-          <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-            <div role="tablist" aria-label="Formato de inspeção" className="flex gap-1">
-              {INSPECTOR_TABS.map((tab, idx) => {
-                const isSelected = activeTab === tab.id;
-                const Icon = tab.id === 'scad' ? Code2 : FileJson;
-                return (
-                  <button
-                    key={tab.id}
-                    ref={(el) => {
-                      tabRefs.current[tab.id] = el;
-                    }}
-                    id={`inspector-tab-${tab.id}`}
-                    type="button"
-                    role="tab"
-                    data-testid={`tab-${tab.id}`}
-                    aria-selected={isSelected}
-                    aria-controls="inspector-panel"
-                    tabIndex={isSelected ? 0 : -1}
-                    onClick={() => setActiveTab(tab.id)}
-                    onKeyDown={(e) => handleTabKeyDown(e, idx)}
-                    className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 ${
-                      isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              data-testid="copy-code"
-              aria-label={
-                copied ? 'Código copiado para a área de transferência' : 'Copiar código exibido'
-              }
-              onClick={() => void handleCopy()}
-              className="inline-flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-                  <span>Copiado</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>Copiar</span>
-                </>
-              )}
-            </button>
-            <span className="sr-only" aria-live="polite">
-              {copied ? 'Código copiado para a área de transferência.' : ''}
-            </span>
+          <div className="relative min-h-[360px] flex-1">
+            <Viewport3D mesh={mesh} loading={loading} error={error} />
           </div>
 
-          {selectedModel ? (
-            <div className="border-b border-zinc-800/80 bg-zinc-950/40 px-3 py-1.5 text-[11px] text-zinc-400">
-              <span className="font-medium text-zinc-300">{selectedModel.label}</span>
-              {' · '}
-              <span className="font-mono">{selectedModel.subtitle}</span>
-            </div>
-          ) : null}
-
-          <div
-            id="inspector-panel"
-            role="tabpanel"
-            aria-labelledby={activeTabButtonId}
-            tabIndex={0}
-            className="min-h-0 flex-1 overflow-auto p-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-          >
-            <pre
-              data-testid="inspector-code"
-              className="font-mono text-xs leading-relaxed text-zinc-300"
-            >
-              <code>{activeTab === 'scad' ? scadCode : irJson}</code>
-            </pre>
-          </div>
-        </aside>
-      </main>
+          <InspectorPanel
+            modelName={selectedPreset.name}
+            modelSubtitle={selectedPreset.description}
+            doc={validatedDoc.ok ? validatedDoc.value : null}
+            mesh={mesh}
+            loading={loading}
+            scadCode={scadCode}
+            irJson={irJson}
+          />
+        </main>
+      )}
     </div>
   );
 }
