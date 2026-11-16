@@ -40,7 +40,7 @@ interface CapturedGeminiRequestBody {
   };
 }
 
-test.describe('M3/M4 — Presets Paramétricos, Exportação STL e /lab', () => {
+test.describe('M3/M4/v1 — Presets Paramétricos, Exportação STL e /lab', () => {
   test('seleciona preset, ajusta slider, renderiza em 3D e exporta arquivo .stl binário válido', async ({
     page,
   }) => {
@@ -50,7 +50,7 @@ test.describe('M3/M4 — Presets Paramétricos, Exportação STL e /lab', () => 
     const editor = new CadEditorPage(page);
     await editor.goto();
     await expect(editor.appTitle).toHaveText('Text-to-CAD');
-    await expect(editor.appStatus).toContainText('M4');
+    await expect(editor.appStatus).toContainText('v1');
 
     // Aguarda avaliação inicial do primeiro preset (Suporte em L)
     await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
@@ -95,7 +95,7 @@ test.describe('M4 — Geração por IA (proxy /api/gemini mockado), BYOK e repar
 
     const editor = new CadEditorPage(page);
     await editor.goto();
-    await expect(editor.appStatus).toContainText('M4');
+    await expect(editor.appStatus).toContainText('v1');
     await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
     await expect(editor.canvas).toBeVisible();
 
@@ -212,6 +212,148 @@ test.describe('M4 — Geração por IA (proxy /api/gemini mockado), BYOK e repar
     };
     expect(parsedBody.ok).toBe(false);
     expect(parsedBody.error?.code).toBe('missing_api_key');
+
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('M5 — Undo/Redo, Histórico Persistente e Responsividade Mobile', () => {
+  test('desfaz e refaz alterações via botões undo/redo e atalho Ctrl+Z fora de inputs', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    const editor = new CadEditorPage(page);
+    await editor.goto();
+    await expect(editor.appStatus).toContainText('v1');
+    await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
+    await expect(editor.dimLabelX).toContainText('X 60,0 mm');
+
+    await expect(editor.undoBtn).toBeDisabled();
+    await expect(editor.redoBtn).toBeDisabled();
+
+    // Alterna Suporte em L -> Flange
+    await editor.selectPreset('flange');
+    await expect(editor.dimLabelX).toContainText('X 100,0 mm', { timeout: 10_000 });
+    await expect(editor.undoBtn).toBeEnabled();
+
+    // Desfaz via botão -> volta para Suporte em L
+    await editor.undoBtn.click();
+    await expect(editor.dimLabelX).toContainText('X 60,0 mm', { timeout: 10_000 });
+    await expect(editor.redoBtn).toBeEnabled();
+
+    // Refaz via botão -> volta para Flange
+    await editor.redoBtn.click();
+    await expect(editor.dimLabelX).toContainText('X 100,0 mm', { timeout: 10_000 });
+
+    // Desfaz via atalho Ctrl+Z com foco fora de inputs
+    await editor.appTitle.click();
+    await page.keyboard.press('Control+z');
+    await expect(editor.dimLabelX).toContainText('X 60,0 mm', { timeout: 10_000 });
+    await expect(editor.redoBtn).toBeEnabled();
+
+    expect(errors).toEqual([]);
+  });
+
+  test('persiste histórico no localStorage após reload sem vazar BYOK, restaura item e limpa histórico', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    const editor = new CadEditorPage(page);
+    await editor.goto();
+    await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
+
+    // Configura BYOK, alterna preset para Flange e gera modelo via IA mockada
+    await editor.setByokKey(DEMO_SESSION_HEADER);
+    await editor.selectPreset('flange');
+    await expect(editor.dimLabelX).toContainText('X 100,0 mm', { timeout: 10_000 });
+
+    await page.route('**/api/gemini', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          ok: true,
+          text: JSON.stringify(VALID_AI_IR),
+          model: 'gemini-2.5-flash',
+        }),
+      });
+    });
+
+    await editor.submitAiPrompt('Cubo 40x30x20 mm com furo central');
+    await expect(editor.aiFeedback).toContainText('Modelo gerado pela IA e validado.', {
+      timeout: 15_000,
+    });
+    await expect(editor.dimLabelX).toContainText('X 40,0 mm', { timeout: 10_000 });
+    await expect(editor.historyItems).toHaveCount(2);
+
+    await page.unroute('**/api/gemini');
+
+    // Recarrega a página e confirma persistência do histórico sem nenhum segredo no localStorage
+    await page.reload();
+    await expect(editor.appStatus).toContainText('v1', { timeout: 15_000 });
+    await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
+    await expect(editor.dimLabelX).toContainText('X 60,0 mm');
+    await expect(editor.historyItems).toHaveCount(2);
+    await expect(editor.historyItemButton(0)).toContainText('Cubo com furo IA');
+    await expect(editor.historyItemButton(1)).toContainText('Flange com Furação');
+
+    const localSnapshot = await page.evaluate(() => ({
+      keys: Object.keys(window.localStorage),
+      rawHistory: window.localStorage.getItem('text-to-cad:history:v1') ?? '',
+    }));
+    expect(localSnapshot.keys).toEqual(['text-to-cad:history:v1']);
+    expect(localSnapshot.rawHistory).not.toContain(DEMO_SESSION_HEADER);
+    expect(localSnapshot.rawHistory).not.toContain('x-user-key');
+    expect(localSnapshot.rawHistory).not.toMatch(/AIza[0-9A-Za-z_-]{8,}/);
+
+    // Restaura modelo da IA salvo no histórico ao clicar no item
+    await editor.historyItemButton(0).click();
+    await expect(editor.dimLabelX).toContainText('X 40,0 mm', { timeout: 10_000 });
+    await expect(editor.inspectorCode).toContainText('difference()');
+
+    // Limpa histórico e confirma estado vazio no DOM e localStorage
+    await editor.historyClearBtn.click();
+    await expect(editor.historyEmpty).toBeVisible();
+    const afterClear = await page.evaluate(() =>
+      window.localStorage.getItem('text-to-cad:history:v1'),
+    );
+    expect(afterClear).toBeNull();
+
+    expect(errors).toEqual([]);
+  });
+
+  test('navega pelas abas responsivas no viewport mobile (390x844) e exporta STL', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const editor = new CadEditorPage(page);
+    await editor.goto();
+    await expect(editor.appStatus).toContainText('v1');
+
+    // Aba Criar & Presets ativa inicialmente
+    await expect(editor.mobileTabCreate).toBeVisible();
+    await expect(editor.mobileTabCreate).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('preset-suporte-l')).toBeVisible();
+    await expect(editor.canvas).toBeHidden();
+    await expect(editor.exportStlBtn).toBeHidden();
+
+    // Aba Visualizar 3D exibe canvas e métricas
+    await editor.selectMobileTab('view');
+    await expect(editor.viewportMetrics).toBeVisible({ timeout: 15_000 });
+    await expect(editor.canvas).toBeVisible();
+
+    // Aba Código & STL exibe inspetor e permite exportar STL binário válido
+    await editor.selectMobileTab('inspect');
+    await expect(editor.exportStlBtn).toBeVisible();
+    await expect(editor.inspectorCode).toContainText('Suporte em L');
+    await editor.exportStlAndAssertBinary('Suporte-em-L.stl');
 
     expect(errors).toEqual([]);
   });

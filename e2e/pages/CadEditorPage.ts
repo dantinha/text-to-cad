@@ -2,14 +2,17 @@ import { readFileSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export type RenderMode = 'wireframe' | 'clay' | 'xray' | 'solid';
+export type MobileTabId = 'create' | 'view' | 'inspect';
 
 /**
- * Page Object do Editor CAD principal (Marco 4: IA Gemini, Presets Paramétricos, Viewport 3D e Exportação).
+ * Page Object do Editor CAD principal (v1: IA Gemini, Presets, Histórico, Undo/Redo, Viewport 3D e Exportação).
  */
 export class CadEditorPage {
   readonly page: Page;
   readonly appTitle: Locator;
   readonly appStatus: Locator;
+  readonly undoBtn: Locator;
+  readonly redoBtn: Locator;
   readonly viewportMetrics: Locator;
   readonly canvas: Locator;
   readonly dimLabelX: Locator;
@@ -24,11 +27,19 @@ export class CadEditorPage {
   readonly aiByokToggle: Locator;
   readonly aiByokInput: Locator;
   readonly aiFeedback: Locator;
+  readonly historyItems: Locator;
+  readonly historyClearBtn: Locator;
+  readonly historyEmpty: Locator;
+  readonly mobileTabCreate: Locator;
+  readonly mobileTabView: Locator;
+  readonly mobileTabInspect: Locator;
 
   constructor(page: Page) {
     this.page = page;
     this.appTitle = page.getByTestId('app-title');
     this.appStatus = page.getByTestId('app-status');
+    this.undoBtn = page.getByTestId('undo-btn');
+    this.redoBtn = page.getByTestId('redo-btn');
     this.viewportMetrics = page.getByTestId('viewport-metrics');
     this.canvas = page.locator('canvas');
     this.dimLabelX = page.getByTestId('dim-label-x');
@@ -43,10 +54,21 @@ export class CadEditorPage {
     this.aiByokToggle = page.getByTestId('ai-byok-toggle');
     this.aiByokInput = page.getByTestId('ai-byok-input');
     this.aiFeedback = page.getByTestId('ai-feedback');
+    this.historyItems = page.getByTestId('history-item');
+    this.historyClearBtn = page.getByTestId('history-clear');
+    this.historyEmpty = page.getByTestId('history-empty');
+    this.mobileTabCreate = page.getByTestId('mobile-tab-create');
+    this.mobileTabView = page.getByTestId('mobile-tab-view');
+    this.mobileTabInspect = page.getByTestId('mobile-tab-inspect');
   }
 
   async goto(): Promise<void> {
     await this.page.goto('/');
+    await expect(this.appTitle).toBeVisible({ timeout: 20_000 });
+  }
+
+  historyItemButton(index: number): Locator {
+    return this.page.getByTestId(`history-item-${index}`);
   }
 
   async selectPreset(presetId: string): Promise<void> {
@@ -77,6 +99,12 @@ export class CadEditorPage {
   async submitAiPrompt(prompt: string): Promise<void> {
     await this.aiPromptInput.fill(prompt);
     await this.aiGenerateBtn.click();
+  }
+
+  async selectMobileTab(tab: MobileTabId): Promise<void> {
+    const tabBtn = this.page.getByTestId(`mobile-tab-${tab}`);
+    await tabBtn.click();
+    await expect(tabBtn).toHaveAttribute('aria-selected', 'true');
   }
 
   async exportStlAndAssertBinary(expectedFilename: string): Promise<void> {
