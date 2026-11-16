@@ -20,10 +20,12 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "e2e": "playwright test",
+    "eval:ai": "node scripts/eval-ai.ts",
     "check:secrets": "node scripts/check-secrets.ts",
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
+    "@google/genai": "^3.4.0",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "immer": "^11.2.10",
