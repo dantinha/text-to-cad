@@ -1,14 +1,17 @@
 import { FlaskConical, Layers3 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { emitScad, validateIR, type MeshData } from '@/core';
+import { generateIR, getByokKey } from '@/ai';
+import { emitScad, validateIR, type IRDocument, type MeshData } from '@/core';
 import { createKernelClient, type KernelClient } from '@/kernel';
 import { getPresetById, PRESETS, type ParamValues } from '@/presets';
 import { Viewport3D } from '@/viewer';
+import { type AiPromptFeedback, AiPromptPanel } from './AiPromptPanel';
 import { InspectorPanel } from './InspectorPanel';
 import { LabPage } from './LabPage';
 import { ParamPanel } from './ParamPanel';
 
 type AppRoute = 'editor' | 'lab';
+type SourceMode = 'preset' | 'ai';
 
 interface EvalState {
   readonly evalKey: string;
@@ -16,7 +19,18 @@ interface EvalState {
   readonly error: string | null;
 }
 
+interface AiModelState {
+  readonly doc: IRDocument | null;
+  readonly prompt: string;
+  readonly evalSeq: number;
+}
+
 const SLIDER_DEBOUNCE_MS = 120;
+
+const IDLE_FEEDBACK: AiPromptFeedback = {
+  status: 'idle',
+  message: '',
+};
 
 function resolveDefaultPreset() {
   const first = PRESETS[0];
@@ -32,11 +46,12 @@ const readCurrentRoute = (): AppRoute =>
   typeof window !== 'undefined' && window.location.pathname === '/lab' ? 'lab' : 'editor';
 
 /**
- * Shell do Marco 3: presets paramétricos com sliders (< 300 ms),
+ * Shell do Marco 4: Prompt IA (Gemini) + presets paramétricos,
  * kernel Web Worker, viewport R3F, exportação STL/SCAD/JSON e rota `/lab`.
  */
 export function App() {
   const [route, setRoute] = useState<AppRoute>(readCurrentRoute);
+  const [sourceMode, setSourceMode] = useState<SourceMode>('preset');
   const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET.id);
   const [paramsByPreset, setParamsByPreset] = useState<Readonly<Record<string, ParamValues>>>(() =>
     Object.fromEntries(PRESETS.map((p) => [p.id, p.defaultParams])),
@@ -47,8 +62,18 @@ export function App() {
     error: null,
   });
 
+  const [aiModel, setAiModel] = useState<AiModelState>({
+    doc: null,
+    prompt: '',
+    evalSeq: 0,
+  });
+  const [aiGenerating, setAiGenerating] = useState<boolean>(false);
+  const [aiFeedback, setAiFeedback] = useState<AiPromptFeedback>(IDLE_FEEDBACK);
+
   const clientRef = useRef<KernelClient | null>(null);
   const hasEvaluatedRef = useRef(false);
+  const immediateEvalRef = useRef(false);
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const onPopState = () => setRoute(readCurrentRoute());
@@ -56,7 +81,25 @@ export function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      aiAbortRef.current?.abort();
+      aiAbortRef.current = null;
+    };
+  }, []);
+
+  const abortInFlightAi = () => {
+    if (!aiAbortRef.current && !aiGenerating) return;
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiGenerating(false);
+    setAiFeedback(IDLE_FEEDBACK);
+  };
+
   const navigate = (nextRoute: AppRoute) => {
+    if (nextRoute === 'lab') {
+      abortInFlightAi();
+    }
     const targetPath = nextRoute === 'lab' ? '/lab' : '/';
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, '', targetPath);
@@ -74,17 +117,24 @@ export function App() {
     [paramsByPreset, selectedPreset],
   );
 
-  const rawDoc = useMemo(
+  const presetRawDoc = useMemo(
     () => selectedPreset.buildIR(currentParams),
     [selectedPreset, currentParams],
   );
 
-  const validatedDoc = useMemo(() => validateIR(rawDoc), [rawDoc]);
+  const validatedDoc = useMemo(() => {
+    if (sourceMode === 'ai' && aiModel.doc !== null) {
+      return { ok: true as const, value: aiModel.doc };
+    }
+    return validateIR(presetRawDoc);
+  }, [sourceMode, aiModel.doc, presetRawDoc]);
 
-  const evalKey = useMemo(
-    () => `${selectedPreset.id}:${JSON.stringify(currentParams)}`,
-    [selectedPreset.id, currentParams],
-  );
+  const evalKey = useMemo(() => {
+    if (sourceMode === 'ai' && aiModel.doc !== null) {
+      return `ai:${aiModel.evalSeq}`;
+    }
+    return `preset:${selectedPreset.id}:${JSON.stringify(currentParams)}`;
+  }, [sourceMode, aiModel.doc, aiModel.evalSeq, selectedPreset.id, currentParams]);
 
   const scadCode = useMemo(() => {
     if (!validatedDoc.ok) return '';
@@ -118,10 +168,14 @@ export function App() {
     if (!client) return;
 
     const controller = new AbortController();
-    const delay = hasEvaluatedRef.current ? SLIDER_DEBOUNCE_MS : 0;
+    const delay =
+      sourceMode === 'preset' && hasEvaluatedRef.current && !immediateEvalRef.current
+        ? SLIDER_DEBOUNCE_MS
+        : 0;
 
     const timer = setTimeout(() => {
       hasEvaluatedRef.current = true;
+      immediateEvalRef.current = false;
       void client.evaluate(validatedDoc.value, controller.signal).then((res) => {
         if (controller.signal.aborted) return;
         if (res.ok) {
@@ -136,14 +190,84 @@ export function App() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [route, validatedDoc, evalKey]);
+  }, [route, sourceMode, validatedDoc, evalKey]);
 
   const isCurrentEval = evalState.evalKey === evalKey;
-  const loading = route === 'editor' && validatedDoc.ok && !isCurrentEval;
+  const kernelEvaluating = route === 'editor' && validatedDoc.ok && !isCurrentEval;
+  const loading = aiGenerating || kernelEvaluating;
   const error = validationError ?? (isCurrentEval ? evalState.error : null);
   const mesh = error ? null : evalState.mesh;
 
+  const isAiActive = sourceMode === 'ai' && aiModel.doc !== null;
+  const modelName = isAiActive ? (aiModel.doc.name ?? 'Modelo IA') : selectedPreset.name;
+  const modelSubtitle = isAiActive ? aiModel.prompt : selectedPreset.description;
+
+  const handleAiGenerate = async (promptText: string) => {
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+
+    setAiGenerating(true);
+    setAiFeedback({ status: 'loading', message: 'Gerando e validando geometria via Gemini...' });
+
+    const userKey = getByokKey() || undefined;
+    const res = await generateIR(promptText, {
+      signal: controller.signal,
+      userKey,
+    });
+
+    if (controller.signal.aborted || aiAbortRef.current !== controller) {
+      return;
+    }
+    aiAbortRef.current = null;
+
+    if (!res.ok) {
+      setAiGenerating(false);
+      if (res.error.code === 'cancelled') {
+        setAiFeedback({ status: 'idle', message: 'Geração cancelada.' });
+      } else {
+        setAiFeedback({ status: 'error', message: res.error.message });
+      }
+      return;
+    }
+
+    const validated = validateIR(res.value);
+    if (!validated.ok) {
+      setAiGenerating(false);
+      setAiFeedback({
+        status: 'error',
+        message: validated.error.map((i) => `${i.path}: ${i.message}`).join(' '),
+      });
+      return;
+    }
+
+    setAiModel((prev) => ({
+      doc: validated.value,
+      prompt: promptText,
+      evalSeq: prev.evalSeq + 1,
+    }));
+    setSourceMode('ai');
+    setAiGenerating(false);
+    setAiFeedback({ status: 'success', message: 'Modelo gerado pela IA e validado.' });
+  };
+
+  const handleAiCancel = () => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiGenerating(false);
+    setAiFeedback({ status: 'idle', message: 'Geração cancelada.' });
+  };
+
+  const handleSelectPreset = (presetId: string) => {
+    abortInFlightAi();
+    immediateEvalRef.current = true;
+    setSourceMode('preset');
+    setSelectedPresetId(presetId);
+  };
+
   const handleChangeParam = (key: string, value: number) => {
+    abortInFlightAi();
+    setSourceMode('preset');
     setParamsByPreset((prev) => {
       const current = prev[selectedPreset.id] ?? selectedPreset.defaultParams;
       const clamped = selectedPreset.clampParams({ ...current, [key]: value });
@@ -175,11 +299,11 @@ export function App() {
                 data-testid="app-status"
                 className="rounded border border-zinc-700 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300"
               >
-                M3 · Paramétrico &amp; STL
+                M4 · IA Gemini, Paramétrico &amp; STL
               </span>
             </div>
             <p className="text-[11px] text-zinc-400">
-              Presets paramétricos → manifold-3d (Worker) → Viewport 3D &amp; Exportação
+              Prompt IA (Gemini) &amp; Presets → manifold-3d (Worker) → Viewport 3D &amp; Exportação
             </p>
           </div>
         </div>
@@ -218,23 +342,35 @@ export function App() {
       {route === 'lab' ? (
         <LabPage />
       ) : (
-        <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <ParamPanel
-            presets={PRESETS}
-            selectedPreset={selectedPreset}
-            params={currentParams}
-            onSelectPreset={setSelectedPresetId}
-            onChangeParam={handleChangeParam}
-            onResetParams={handleResetParams}
-          />
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+          <aside
+            aria-label="Prompt IA, presets e parâmetros do modelo"
+            className="flex max-h-80 w-full shrink-0 flex-col overflow-y-auto border-b border-zinc-800 bg-zinc-900/50 lg:max-h-none lg:w-72 lg:border-r lg:border-b-0 xl:w-80"
+          >
+            <AiPromptPanel
+              generating={aiGenerating}
+              feedback={aiFeedback}
+              onGenerate={(promptText) => void handleAiGenerate(promptText)}
+              onCancel={handleAiCancel}
+            />
+            <ParamPanel
+              presets={PRESETS}
+              selectedPreset={selectedPreset}
+              params={currentParams}
+              isAiActive={isAiActive}
+              onSelectPreset={handleSelectPreset}
+              onChangeParam={handleChangeParam}
+              onResetParams={handleResetParams}
+            />
+          </aside>
 
           <div className="relative min-h-[360px] flex-1">
             <Viewport3D mesh={mesh} loading={loading} error={error} />
           </div>
 
           <InspectorPanel
-            modelName={selectedPreset.name}
-            modelSubtitle={selectedPreset.description}
+            modelName={modelName}
+            modelSubtitle={modelSubtitle}
             doc={validatedDoc.ok ? validatedDoc.value : null}
             mesh={mesh}
             loading={loading}
