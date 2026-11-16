@@ -280,38 +280,41 @@ export function Viewport3D({
         </div>
       ) : null}
 
-      {/* HUD inferior de métricas técnicas */}
-      {metrics && !(hasError && !loading) ? (
-        <div
-          data-testid="viewport-metrics"
-          className="pointer-events-auto absolute bottom-3 left-3 z-10 rounded-md border border-zinc-800 bg-zinc-900/90 px-3 py-2 backdrop-blur-sm select-text"
-        >
-          <dl className="grid grid-cols-3 gap-x-4 gap-y-0.5 text-[11px]">
-            <div>
-              <dt className="uppercase tracking-wider text-zinc-400">Dimensões</dt>
-              <dd className="font-mono font-medium tabular-nums text-zinc-100">
-                {metrics.formattedDimensions}
-              </dd>
-            </div>
-            <div className="text-right">
-              <dt className="uppercase tracking-wider text-zinc-400">Volume</dt>
-              <dd className="font-mono font-medium tabular-nums text-zinc-100">
-                {metrics.formattedVolume}
-              </dd>
-            </div>
-            <div className="text-right">
-              <dt className="uppercase tracking-wider text-zinc-400">Triângulos</dt>
-              <dd className="font-mono font-medium tabular-nums text-zinc-100">
-                {metrics.formattedTriangles}
-              </dd>
-            </div>
-          </dl>
-        </div>
-      ) : null}
+      {/* HUD inferior: métricas técnicas e legenda sem sobreposição */}
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-end justify-between gap-2">
+        {metrics && !(hasError && !loading) ? (
+          <div
+            data-testid="viewport-metrics"
+            className="pointer-events-auto rounded-md border border-zinc-800 bg-zinc-900/90 px-3 py-2 backdrop-blur-sm select-text"
+          >
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-0.5 text-[11px]">
+              <div>
+                <dt className="uppercase tracking-wider text-zinc-400">Dimensões</dt>
+                <dd className="font-mono font-medium tabular-nums text-zinc-100">
+                  {metrics.formattedDimensions}
+                </dd>
+              </div>
+              <div className="text-right">
+                <dt className="uppercase tracking-wider text-zinc-400">Volume</dt>
+                <dd className="font-mono font-medium tabular-nums text-zinc-100">
+                  {metrics.formattedVolume}
+                </dd>
+              </div>
+              <div className="text-right">
+                <dt className="uppercase tracking-wider text-zinc-400">Triângulos</dt>
+                <dd className="font-mono font-medium tabular-nums text-zinc-100">
+                  {metrics.formattedTriangles}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        ) : (
+          <span />
+        )}
 
-      {/* Legenda compacta de navegação */}
-      <div className="pointer-events-none absolute right-3 bottom-3 z-10 hidden rounded border border-zinc-800/80 bg-zinc-900/80 px-2 py-1 font-mono text-[10px] text-zinc-400 select-none sm:block">
-        Z↑ · Arrastar: orbitar · Roda: zoom · Direito / Setas: mover
+        <div className="hidden rounded border border-zinc-800/80 bg-zinc-900/80 px-2 py-1 font-mono text-[10px] text-zinc-400 select-none sm:block">
+          Z↑ · Arrastar: orbitar · Roda: zoom · Direito / Setas: mover
+        </div>
       </div>
     </section>
   );
