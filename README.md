@@ -2,7 +2,11 @@
 
 Descreva uma peça em português e veja o modelo 3D paramétrico no navegador, com exportação para impressão 3D.
 
-> **Status:** v1 em construção. Hoje existem a fundação do projeto e o contrato central (IR + validação). Geração, kernel 3D e viewer chegam nos próximos marcos. Plano e decisões em [`docs/`](docs/).
+[![Tests](https://img.shields.io/badge/Tests-101_passed-10b981.svg?style=for-the-badge)](tests/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](tsconfig.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+
+> **Status:** v1 em construção (M0–M2 concluídos). Já funcionam o contrato central (IR Zod + validação), o emissor OpenSCAD, o kernel CSG `manifold-3d` em Web Worker e o viewport 3D (React Three Fiber, Z-up, 4 modos de renderização, cotas e fit-to-view). Presets, exportação STL e integração com Gemini chegam nos próximos marcos. Plano e decisões em [`docs/`](docs/).
 
 ## Como funciona
 
@@ -35,8 +39,8 @@ A chave **nunca** vai ao repositório nem ao navegador. Copie `.env.example` par
 
 ```
 src/core/      IR, schema, validação, contratos        (congelado desde o M1)
-src/kernel/    avaliação CSG com manifold-3d em Worker (M2)
-src/viewer/    viewport React Three Fiber              (M2)
+src/kernel/    avaliação CSG com manifold-3d em Worker (M2, pronto)
+src/viewer/    viewport React Three Fiber              (M2, pronto)
 src/presets/   modelos paramétricos prontos            (M3)
 src/export/    STL, SCAD, JSON                         (M3)
 src/ai/        cliente Gemini e loop de reparo         (M4)
