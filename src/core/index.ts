@@ -38,3 +38,4 @@ export * from './ir/limits';
 export { irDocumentSchema, irNodeSchema, NODE_TYPES } from './ir/schema';
 export { validateIR } from './ir/validate';
 export { err, ok } from './result';
+export { emitScad } from './scad';
