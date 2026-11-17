@@ -1,85 +1,121 @@
-# Text-to-CAD
+# Text-to-CAD 🧊
 
-Descreva uma peça em português e veja o modelo 3D paramétrico no navegador, com visualização interativa e exportação pronta para impressão 3D.
+> 🌐 **English** · [Leia em Português (PT-BR)](README.pt-BR.md)
 
-[![Tests](https://img.shields.io/badge/Tests-201_passed-10b981.svg?style=for-the-badge)](tests/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](tsconfig.json)
+[![Status](https://img.shields.io/badge/Release-v1_Complete_(M0--M5)-6366f1.svg?style=for-the-badge)](docs/architecture/visao-geral.md)
+[![Unit Tests](https://img.shields.io/badge/Unit_Tests-201_Passed_(95%25+_Cov)-10b981.svg?style=for-the-badge)](tests/)
+[![E2E](https://img.shields.io/badge/Playwright_E2E-5%2F5_Passed-10b981.svg?style=for-the-badge)](e2e/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](tsconfig.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-> **Status:** **v1 concluída (M0–M5)**. Inclui geração por IA via Gemini com proxy seguro `/api/gemini` e loop de reparo, 4 presets paramétricos com ajuste em tempo real, kernel CSG `manifold-3d` em Web Worker, viewport React Three Fiber (Z-up, 4 modos, grid/cotas), emissor OpenSCAD, exportação binária `.stl`/`.scad`/`.json`, histórico persistente de 20 modelos, Desfazer/Refazer (`Ctrl+Z`/`Ctrl+Shift+Z`), layout responsivo desktop/mobile e rota `/lab`.
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](package.json)
+[![Three.js / R3F](https://img.shields.io/badge/3D-React_Three_Fiber_%2B_manifold--3d-000000?logo=threedotjs)](package.json)
+[![Gemini](https://img.shields.io/badge/AI-Gemini_Structured_Outputs-4285F4?logo=googlegemini&logoColor=white)](src/ai/)
+[![Cloudflare Workers](https://img.shields.io/badge/Proxy-Cloudflare_Worker-F38020?logo=cloudflare&logoColor=white)](wrangler.toml)
 
-## Como funciona
+**Natural-language to parametric 3D CAD engine in the browser — deterministic CSG geometry, interactive Three.js viewport, and verified binary `.stl` / `.scad` export.**
 
+---
+
+## ⚡ TL;DR — Why This Exists
+
+Asking an LLM to write raw OpenSCAD code or raw triangle meshes produces broken geometry, non-manifold edges, and security risks. **Text-to-CAD enforces a deterministic compiler boundary**:
+
+- **Structured CSG Intermediate Representation (IR):** Gemini outputs only a strict JSON CSG tree validated by **Zod** (`validateIR`, `MAX_NODES = 200`, mm, Z-up) with an automated self-repair loop (up to `2` retries passing `IRIssue[]` diagnostics back to the model).
+- **WASM CAD Kernel in a Web Worker:** Geometry is evaluated off the main thread by **manifold-3d** (`10s` timeout, `AbortSignal` cancellation, zero-copy transferable `MeshData`) and exported as verified binary `.stl` (`84 + 50 * triCount` bytes), deterministic `.scad`, or `.json`.
+- **Hardened AI Proxy & Secret Hygiene:** Server-side `/api/gemini` proxy (Vite dev middleware + Cloudflare Worker with fail-closed CORS, `150 KB` stream cap, and sliding-window rate limiting) + optional **BYOK** strictly isolated in `sessionStorage` + pre-commit & CI secret scanning (`check:secrets` + `gitleaks`).
+- **Verified Engineering Rigor:** **201 unit tests (20 suites)**, **95.22% statement / 97.06% line coverage**, **5/5 Playwright E2E tests** (desktop & mobile), TypeScript `strict`, and ADRs ([`ADR-001`](docs/adr/ADR-001-stack.md), [`ADR-002`](docs/adr/ADR-002-ir-contrato.md)).
+
+---
+
+## 🏗️ Architecture & Deterministic Pipeline
+
+```mermaid
+flowchart LR
+  UI["React 19 + Zustand/Immer<br/>(src/app/)"] -->|"POST /api/gemini"| Proxy
+  Presets["4 Parametric Presets<br/>(src/presets/)"] --> UI
+  AI["Gemini Client + Repair Loop<br/>(src/ai/)"] -->|"JSON + validateIR (Zod)"| UI
+  UI -->|"Validated CSG IR"| Kernel["Web Worker manifold-3d<br/>(src/kernel/)"]
+  UI -->|"IR"| SCAD["OpenSCAD Emitter<br/>(src/core/scad/)"]
+  Kernel -->|"Zero-Copy MeshData"| VP["3D Viewport R3F<br/>(src/viewer/)"]
+  Kernel -->|"MeshData"| Export["Binary .stl / .scad / .json<br/>(src/export/)"]
+  subgraph Proxy["Hardened Proxy (/api/gemini)"]
+    Dev["Vite Middleware (server/dev-proxy.ts)"]
+    CF["Cloudflare Worker (server/worker.ts)"]
+  end
+  Proxy -->|"Server-only GEMINI_API_KEY"| Gemini["Google Gemini API"]
 ```
-prompt ──► IA (Gemini /api/gemini) ─┐
-                                    ├─► IR (árvore CSG em JSON, Zod) ─┬─► kernel manifold-3d (Worker) ─► viewport 3D ─► .stl
-presets paramétricos ───────────────┘                                 └─► emissor OpenSCAD ────────────► .scad / .json
-```
 
-A IA **não** gera malha nem código OpenSCAD direto: ela gera o **IR (Intermediate Representation)** validado por `validateIR` com guardrails rígidos antes de virar geometria. Veja [`docs/architecture/visao-geral.md`](docs/architecture/visao-geral.md), [`ADR-001`](docs/adr/ADR-001-stack.md) e [`ADR-002`](docs/adr/ADR-002-ir-contrato.md).
+---
 
-## Funcionalidades da v1
+## ✨ Key v1 Capabilities
 
-- **Prompt IA em PT-BR (`src/ai/`, `server/`):** Structured Outputs no Gemini com adaptação para `$ref` recursivo, proteção anti-prompt-injection, rate limit (`1` por vez, `10/min`), timeout de `30 s`, loop automático de reparo (até `2` reenvios com os `IRIssue[]`) e opção **BYOK** isolada em `sessionStorage`.
-- **4 Presets Paramétricos (`src/presets/`):** _Suporte em L_, _Flange com Furação_, _Caixa com Divisórias_ e _Bucha / Espaçador_, com sliders instantâneos e invariants protegidos (`clampParams`).
-- **Viewport 3D & Rota `/lab` (`src/viewer/`, `src/app/`):** eixo Z para cima, 4 modos (_Sólido_, _Wireframe_, _Argila_, _Raio-X_), grid milimétrico, cotas X/Y/Z, volume em cm³, contagem de triângulos e inspeção lado a lado em `/lab`.
-- **Exportação (`src/export/`):** `.stl` binário verificado (header 80 bytes + `50` bytes/triângulo), código `.scad` determinístico e `.json` do IR.
-- **Produtividade & A11y (`src/app/`, `src/i18n/`):** store imutável (`zustand` + `immer`), Desfazer/Refazer (`Ctrl+Z` / `Ctrl+Shift+Z`), histórico de até `20` modelos no `localStorage` (sem chaves), abas mobile WAI-ARIA, skip link e dicionário centralizado em `src/i18n/pt-BR.ts`.
+- **AI Prompt Engine (`src/ai/`, `server/`):** Gemini Structured Outputs with recursive `$ref` schema adaptation, anti-prompt-injection system prefix, concurrency/rate limits (`1` active, `10/min`), `30s` timeout, 2-step `IRIssue[]` repair loop, and `sessionStorage`-scoped BYOK.
+- **4 Parametric Presets (`src/presets/`):** *L-Bracket*, *Flange with Holes*, *Divider Box*, and *Bushing / Spacer* — real-time sliders guarded by invariant clamping (`clampParams`).
+- **3D Viewport & `/lab` Route (`src/viewer/`, `src/app/`):** Z-up coordinate system, 4 render modes (*Solid*, *Wireframe*, *Clay*, *X-Ray*), millimetric grid, projected X/Y/Z dimensions, volume (`cm³`), triangle count, and side-by-side inspection on `/lab`.
+- **Verified Exports (`src/export/`):** Validated binary `.stl` (`80`-byte header + `50` bytes/triangle), deterministic `.scad`, and raw `.json` IR.
+- **Productivity & Accessibility (`src/app/`, `src/i18n/`):** Immutable `zustand` + `immer` store, Undo/Redo (`Ctrl+Z` / `Ctrl+Shift+Z`), `localStorage` history (up to `20` models with key redaction), WAI-ARIA mobile tabs, skip link, and centralized PT-BR UI dictionary (`src/i18n/pt-BR.ts`).
 
-## Rodando localmente
+---
 
-Requer **Node 22+**.
+## 🚀 Running Locally
+
+Requires **Node.js 22+**.
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173 (editor) e http://localhost:5173/lab
-npm test             # testes unitários (Vitest)
-npm run coverage     # cobertura mínima de 80% (inclui core, kernel, export, presets, ai, server, app, i18n)
-npm run e2e          # Playwright end-to-end (instale antes: npx playwright install chromium)
+npm run dev          # http://localhost:5173 (editor) and http://localhost:5173/lab
+npm test             # 201 unit tests across 20 suites (Vitest)
+npm run coverage     # >=80% coverage gate (95%+ achieved)
+npm run e2e          # 5 Playwright E2E tests (run: npx playwright install chromium)
 npm run lint && npm run typecheck && npm run build
 ```
 
-## Chave do Gemini & Avaliação IA
+---
 
-A chave **nunca** entra no repositório nem no bundle do navegador:
+## 🔐 Gemini API Key & Security Invariants
 
-1. **Via `.env.local` (dev):** copie `.env.example` para `.env.local` (ignorado pelo Git) e preencha `GEMINI_API_KEY`. Nunca use prefixo `VITE_` para segredos.
-2. **Via interface (BYOK):** abra _Chave própria (BYOK)_ no painel esquerdo; a chave fica restrita ao `sessionStorage` da aba e vai apenas no header `x-user-key` para `/api/gemini`.
-3. **Eval manual dos 10 prompts de referência:** com `GEMINI_API_KEY` preenchida em `.env.local`, rode:
+API credentials **never** enter the repository or browser bundle:
 
-```bash
-npm run eval:ai
+1. **Local `.env.local`:** Copy `.env.example` to `.env.local` (git-ignored) and set `GEMINI_API_KEY`. Never use `VITE_` prefixes for secrets.
+2. **UI BYOK Mode:** Open *Chave própria (BYOK)* in the left panel; the key stays strictly in tab `sessionStorage` and travels only in the `x-user-key` header to `/api/gemini`.
+3. **Reference AI Eval (10 Prompts):** With `GEMINI_API_KEY` in `.env.local`:
+   ```bash
+   npm run eval:ai
+   ```
+4. **CI & Hook Guards:** `.githooks/` pre-commit and CI (`npm run check:secrets`, `dist/` bundle scan, and `gitleaks`) block any secret leakage.
+
+---
+
+## ☁️ Deployment (Cloudflare Pages + Worker)
+
+- **Frontend:** Build `dist/` via `npm run build` and deploy to Cloudflare Pages.
+- **Proxy `/api/gemini`:** Configured in [`server/worker.ts`](server/worker.ts) and [`wrangler.toml`](wrangler.toml) with **fail-closed CORS** when `ALLOWED_ORIGINS` is unset:
+  ```bash
+  npx wrangler secret put GEMINI_API_KEY
+  npx wrangler secret put ALLOWED_ORIGINS
+  npx wrangler deploy
+  ```
+
+---
+
+## 📂 Repository Layout
+
+```text
+src/core/      Frozen IR contract, Zod schema, validation guardrails & OpenSCAD emitter
+src/kernel/    WASM CSG evaluation via manifold-3d in isolated Web Worker
+src/viewer/    React Three Fiber 3D viewport (Z-up, 4 render modes, dimensions)
+src/presets/   4 parametric CAD models + invariant clamping
+src/export/    Binary .stl, .scad, and .json exporters
+src/ai/        Gemini client, adapted schema, prompts, rate limiter & BYOK
+server/        Hardened /api/gemini proxy (Vite dev middleware + Cloudflare Worker)
+src/app/       React 19 shell, Zustand/Immer store, localStorage history & /lab route
+src/i18n/      Centralized PT-BR interface dictionary
+docs/          Architecture overview & ADRs (ADR-001, ADR-002)
 ```
 
-Um hook de pré-commit (`.githooks/`) e o CI (`check:secrets`, varredura em `dist/` e `gitleaks`) bloqueiam qualquer commit ou bundle com segredos.
+---
 
-## Deploy (Cloudflare Pages + Worker)
+## 📄 License
 
-- **Frontend:** gere `dist/` com `npm run build` e publique no Cloudflare Pages.
-- **Proxy `/api/gemini`:** definido em [`server/worker.ts`](server/worker.ts) e [`wrangler.toml`](wrangler.toml) com CORS _fail-closed_ por padrão se `ALLOWED_ORIGINS` não estiver definido:
-
-```bash
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put ALLOWED_ORIGINS
-npx wrangler deploy
-```
-
-## Estrutura
-
-```
-src/core/      IR, schema Zod, validação, contratos e emissor OpenSCAD (congelado desde M1)
-src/kernel/    avaliação CSG com manifold-3d em Web Worker
-src/viewer/    viewport React Three Fiber (Z-up, 4 modos, cotas)
-src/presets/   4 modelos paramétricos prontos + clamp de invariantes
-src/export/    exportação binária .stl, .scad e .json
-src/ai/        cliente Gemini, schema adaptado, prompts, rate limit e BYOK (sessionStorage)
-server/        proxy seguro /api/gemini (middleware dev no Vite + Cloudflare Worker)
-src/app/       shell React, store Zustand/Immer, histórico (localStorage) e rota /lab
-src/i18n/      dicionário PT-BR da interface
-docs/          ADRs (M0–M1) e visão geral da arquitetura
-.agents/       equipes e regras dos subagentes do projeto
-```
-
-## Licença
-
-MIT
+Distributed under the **MIT** license. See [`LICENSE`](LICENSE) for details.
